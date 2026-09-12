@@ -13,6 +13,6 @@ struct MousePollingRateToolApp: App {
         WindowGroup {
             ContentView()
         }
-        .defaultSize(width: 300, height: 340)
+        .defaultSize(width: 540, height: 580)
     }
 }

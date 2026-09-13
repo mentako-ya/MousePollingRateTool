@@ -34,22 +34,33 @@
 
 <img src="docs/images/gatekeeper_warning.png" width="260" alt="Gatekeeper警告ダイアログ">
 
-以下のいずれかの方法で初回のみ実行許可を行ってください。
+以下のいずれかの方法で初回のみ実行許可を行ってください。**方法1（システム設定から許可）が最も確実でおすすめです。**
 
-#### 方法1: ターミナルで解除（おすすめ・一発で解除）
+#### 方法1: システム設定から許可（推奨・確実）
 
-ターミナルを開き、以下のコマンドを実行してダウンロード時の隔離属性（quarantine）を解除します。
+macOS標準の手順で、権限エラーなく確実に許可できます。
 
-```bash
-xattr -cr /Applications/MousePollingRateTool.app
-```
-
-#### 方法2: システム設定から許可
-
-1. 警告ダイアログの「完了」をクリックして閉じます。
+1. 警告ダイアログの **「完了」** をクリックして閉じます。
 2. **システム設定** → **プライバシーとセキュリティ** を開きます。
 3. 画面下部（セキュリティ項目）にある「*"MousePollingRateTool.app" は開発元を検証できないため、使用がブロックされました*」の横の **「このまま開く」** をクリックします。
 4. Macのログインパスワードまたは Touch ID で認証し、確認ダイアログで **「開く」** をクリックします。
+
+#### 方法2: ターミナルで解除
+
+ターミナルからダウンロード時の隔離属性（quarantine）を解除する場合：
+
+```bash
+xattr -d com.apple.quarantine /Applications/MousePollingRateTool.app
+```
+
+> [!WARNING]
+> **`xattr: [Errno 1] Operation not permitted` と表示される場合**  
+> macOS Sequoia 等のセキュリティ制限により、ターミナルから `/Applications` 内のファイル属性変更がブロックされています。  
+> 解決するには、上記「**方法1（システム設定から許可）**」をお試しいただくか、`sudo` を付けて実行してください：
+> ```bash
+> sudo xattr -rd com.apple.quarantine /Applications/MousePollingRateTool.app
+> ```
+> （または、DMGを開く前にダウンロードフォルダ内のDMGに対して実行することでも回避できます：`xattr -d com.apple.quarantine ~/Downloads/MousePollingRateTool.dmg`）
 
 ---
 

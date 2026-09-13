@@ -34,33 +34,12 @@
 
 <img src="docs/images/gatekeeper_warning.png" width="260" alt="Gatekeeper警告ダイアログ">
 
-以下のいずれかの方法で初回のみ実行許可を行ってください。**方法1（システム設定から許可）が最も確実でおすすめです。**
-
-#### 方法1: システム設定から許可（推奨・確実）
-
-macOS標準の手順で、権限エラーなく確実に許可できます。
+初回のみ、以下の手順でシステム設定から実行許可を行ってください。
 
 1. 警告ダイアログの **「完了」** をクリックして閉じます。
 2. **システム設定** → **プライバシーとセキュリティ** を開きます。
 3. 画面下部（セキュリティ項目）にある「*"MousePollingRateTool.app" は開発元を検証できないため、使用がブロックされました*」の横の **「このまま開く」** をクリックします。
 4. Macのログインパスワードまたは Touch ID で認証し、確認ダイアログで **「開く」** をクリックします。
-
-#### 方法2: ターミナルで解除
-
-ターミナルからダウンロード時の隔離属性（quarantine）を解除する場合：
-
-```bash
-xattr -d com.apple.quarantine /Applications/MousePollingRateTool.app
-```
-
-> [!WARNING]
-> **`xattr: [Errno 1] Operation not permitted` と表示される場合**  
-> macOS Sequoia 等のセキュリティ制限により、ターミナルから `/Applications` 内のファイル属性変更がブロックされています。  
-> 解決するには、上記「**方法1（システム設定から許可）**」をお試しいただくか、`sudo` を付けて実行してください：
-> ```bash
-> sudo xattr -rd com.apple.quarantine /Applications/MousePollingRateTool.app
-> ```
-> （または、DMGを開く前にダウンロードフォルダ内のDMGに対して実行することでも回避できます：`xattr -d com.apple.quarantine ~/Downloads/MousePollingRateTool.dmg`）
 
 ---
 
@@ -110,13 +89,7 @@ open MousePollingRateTool.xcodeproj
 4. 「“MousePollingRateTool”を今すぐ終了して再度開きますか？」と表示された場合は、**「終了して再度開く」** をクリックします（表示されない場合は一度アプリを手動で終了し、再起動してください）。
 
 > [!NOTE]
-> **すでにトグルがオンになっているにもかかわらずダイアログが繰り返し表示される場合**  
-> macOSのプライバシー管理機構（TCC）で古いキャッシュが残っている可能性があります。以下のいずれかをお試しください。
-> 1. 「システム設定」の「入力監視」画面で、`MousePollingRateTool` のトグルを一度 **オフ** にしてから再度 **オン** に切り替え、アプリを再起動する。
-> 2. ターミナルで以下のコマンドを実行して権限キャッシュをリセットし、アプリを再起動して再度許可ダイアログから許可する。
->    ```bash
->    tccutil reset ListenEvent mentako-ya.MousePollingRateTool
->    ```
+> すでにトグルがオンになっているにもかかわらずダイアログが表示される場合は、一度トグルを **オフ** にしてから再度 **オン** に切り替え、アプリを再起動してください。
 
 ## 技術仕様
 

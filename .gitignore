@@ -1,0 +1,17 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Xcode
+build/
+DerivedData/
+*.moved-aside
+*.xcuserstate
+xcuserdata/
+*.xcscmblueprint
+
+# Temporary / Staging
+*.tmp
+*.temp

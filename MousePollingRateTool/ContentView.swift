@@ -342,26 +342,91 @@ struct ContentView: View {
         hidManager?.resetPositionA()
     }
 
-    // 画面リフレッシュのタイミングでNSEvent座標を確定
+    // 画面リフレッシュのタイミングでNSEvent座標とHID移動量を合成して軌跡を生成
     func flushPendingPoints() {
         guard let tracker = hidManager else { return }
 
         let posB = NSEvent.mouseLocation
-        let (posA, times) = tracker.consumePending(posB: posB)
+        let (posA, samples) = tracker.consumePending(posB: posB)
 
-        guard !times.isEmpty else { return }
+        guard !samples.isEmpty else { return }
         guard let canvasA = screenToCanvas(posA),
               let canvasB = screenToCanvas(posB) else { return }
 
-        let n = times.count
+        let n = samples.count
         let now = CACurrentMediaTime()
-        var newPoints: [TrailPoint] = []
 
-        for (i, t) in times.enumerated() {
-            let ratio = CGFloat(i + 1) / CGFloat(n)
-            let x = canvasA.x + (canvasB.x - canvasA.x) * ratio
-            let y = canvasA.y + (canvasB.y - canvasA.y) * ratio
-            newPoints.append(TrailPoint(position: CGPoint(x: x, y: y), time: t))
+        // 画面上での総移動量ベクトル (S_x, S_y)
+        let sx = canvasB.x - canvasA.x
+        let sy = canvasB.y - canvasA.y
+        let sLenSq = sx * sx + sy * sy
+        let sLen = sqrt(sLenSq)
+
+        // 生HID移動量の累積ベクトル列を計算
+        var cumX: [CGFloat] = []
+        var cumY: [CGFloat] = []
+        cumX.reserveCapacity(n)
+        cumY.reserveCapacity(n)
+
+        var runningX: CGFloat = 0
+        var runningY: CGFloat = 0
+        var totalPathLen: CGFloat = 0
+
+        for s in samples {
+            runningX += s.dx
+            runningY += s.dy
+            cumX.append(runningX)
+            cumY.append(runningY)
+            totalPathLen += sqrt(s.dx * s.dx + s.dy * s.dy)
+        }
+
+        let vx = runningX
+        let vy = runningY
+        let vLenSq = vx * vx + vy * vy
+        let vLen = sqrt(vLenSq)
+
+        var newPoints: [TrailPoint] = []
+        newPoints.reserveCapacity(n)
+
+        // 2D相似変換（回転＋スケーリング）が安定して適用できる条件:
+        // 1. 生移動ベクトル V と 画面移動ベクトル S が共に一定以上の大きさを持つ
+        // 2. Vの大きさが各ステップの移動距離の総和に対して極端に小さくない（打ち消し合いUターンでのスケール暴走防止）
+        let canApplySimilarity = vLen > 0.5 && sLen > 0.5 && (vLen >= 0.2 * totalPathLen)
+
+        if canApplySimilarity {
+            // 相似変換行列の成分:
+            // S = M * V となる回転・スケール行列
+            // a = (S_x * V_x + S_y * V_y) / |V|^2
+            // b = (S_y * V_x - S_x * V_y) / |V|^2
+            let a = (sx * vx + sy * vy) / vLenSq
+            let b = (sy * vx - sx * vy) / vLenSq
+
+            for (i, s) in samples.enumerated() {
+                let cx = cumX[i]
+                let cy = cumY[i]
+                let mappedX = canvasA.x + (a * cx - b * cy)
+                let mappedY = canvasA.y + (b * cx + a * cy)
+                newPoints.append(TrailPoint(position: CGPoint(x: mappedX, y: mappedY), time: s.time))
+            }
+        } else if totalPathLen > 0.001 {
+            // Uターンや特殊ケース: 各ステップの移動距離の累積比率で始点から終点へ滑らかに補間
+            var currentDist: CGFloat = 0
+            for s in samples {
+                let stepDist = sqrt(s.dx * s.dx + s.dy * s.dy)
+                currentDist += stepDist
+                let ratio = currentDist / totalPathLen
+                let x = canvasA.x + sx * ratio
+                let y = canvasA.y + sy * ratio
+                newPoints.append(TrailPoint(position: CGPoint(x: x, y: y), time: s.time))
+            }
+        } else {
+            // 移動が極小またはゼロの場合: 単純等分フォールバック
+            for (i, s) in samples.enumerated() {
+                let ratio = CGFloat(i + 1) / CGFloat(n)
+                let x = canvasA.x + sx * ratio
+                let y = canvasA.y + sy * ratio
+                newPoints.append(TrailPoint(position: CGPoint(x: x, y: y), time: s.time))
+            }
         }
 
         trailPoints.append(contentsOf: newPoints)
@@ -385,9 +450,17 @@ func screenToCanvas(_ screenPt: CGPoint) -> CGPoint? {
 
 // MARK: - IOHIDManager
 
+struct HIDSample {
+    var dx: CGFloat
+    var dy: CGFloat
+    let time: Double
+}
+
 class HIDMouseTracker {
     private var manager: IOHIDManager?
-    private var pendingTimes: [Double] = []
+    private var pendingSamples: [HIDSample] = []
+    private var lastReportTimestamp: UInt64 = 0
+    private var lastReportMediaTime: Double = 0
     private var posA: CGPoint = .zero
 
     let onEvent: (Double) -> Void
@@ -399,17 +472,19 @@ class HIDMouseTracker {
         self.onPermissionError = onPermissionError
     }
 
-    func consumePending(posB: CGPoint) -> (CGPoint, [Double]) {
+    func consumePending(posB: CGPoint) -> (CGPoint, [HIDSample]) {
         let a = posA
-        let times = pendingTimes
-        pendingTimes = []
+        let samples = pendingSamples
+        pendingSamples = []
         posA = posB
-        return (a, times)
+        return (a, samples)
     }
 
     func resetPositionA() {
         posA = NSEvent.mouseLocation
-        pendingTimes = []
+        pendingSamples = []
+        lastReportTimestamp = 0
+        lastReportMediaTime = 0
     }
 
     func start() {
@@ -428,15 +503,17 @@ class HIDMouseTracker {
         IOHIDManagerRegisterInputValueCallback(manager, { context, _, _, value in
             guard let context else { return }
             let element = IOHIDValueGetElement(value)
-            guard IOHIDElementGetUsagePage(element) == UInt32(kHIDPage_GenericDesktop),
-                  IOHIDElementGetUsage(element) == UInt32(kHIDUsage_GD_X) else { return }
+            guard IOHIDElementGetUsagePage(element) == UInt32(kHIDPage_GenericDesktop) else { return }
+
+            let usage = IOHIDElementGetUsage(element)
+            guard usage == UInt32(kHIDUsage_GD_X) || usage == UInt32(kHIDUsage_GD_Y) else { return }
 
             let tracker = Unmanaged<HIDMouseTracker>.fromOpaque(context).takeUnretainedValue()
+            let timestamp = IOHIDValueGetTimeStamp(value)
+            let intVal = IOHIDValueGetIntegerValue(value)
             let eventTime = CACurrentMediaTime()
 
-            tracker.pendingTimes.append(eventTime)
-            tracker.onEvent(eventTime)
-
+            tracker.handleHIDValue(usage: usage, value: intVal, timestamp: timestamp, mediaTime: eventTime)
         }, selfPtr)
 
         IOHIDManagerScheduleWithRunLoop(manager, CFRunLoopGetMain(), CFRunLoopMode.defaultMode.rawValue)
@@ -444,6 +521,40 @@ class HIDMouseTracker {
         let result = IOHIDManagerOpen(manager, IOOptionBits(kIOHIDOptionsTypeNone))
         if result != kIOReturnSuccess {
             DispatchQueue.main.async { [weak self] in self?.onPermissionError() }
+        }
+    }
+
+    func handleHIDValue(usage: UInt32, value: CFIndex, timestamp: UInt64, mediaTime: Double) {
+        let isX = (usage == UInt32(kHIDUsage_GD_X))
+        let isY = (usage == UInt32(kHIDUsage_GD_Y))
+        let delta = CGFloat(value)
+
+        // 同一HIDレポートの判定:
+        // 1. timestamp が非ゼロで直前レポートと同一
+        // 2. または timestamp が 0 の場合、直前イベントとの時間差が極小（200マイクロ秒未満）
+        let isSameReport = (timestamp != 0 && timestamp == lastReportTimestamp) ||
+                           (timestamp == 0 && abs(mediaTime - lastReportMediaTime) < 0.0002)
+
+        if isSameReport && !pendingSamples.isEmpty {
+            let lastIdx = pendingSamples.count - 1
+            if isX {
+                pendingSamples[lastIdx].dx += delta
+            } else if isY {
+                pendingSamples[lastIdx].dy += delta
+            }
+        } else {
+            // 新規レポートパケット
+            lastReportTimestamp = timestamp
+            lastReportMediaTime = mediaTime
+            let sample = HIDSample(
+                dx: isX ? delta : 0,
+                dy: isY ? delta : 0,
+                time: mediaTime
+            )
+            pendingSamples.append(sample)
+
+            // 1パケットにつき1回だけポーリングレート通知
+            onEvent(mediaTime)
         }
     }
 
